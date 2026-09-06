@@ -1,0 +1,18 @@
+{
+  "name": "Nota Blaugrana — My Barça Ratings",
+  "short_name": "Nota Blaugrana",
+  "description": "Fast, structured FC Barcelona player ratings for every match.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#04101f",
+  "theme_color": "#071b33",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

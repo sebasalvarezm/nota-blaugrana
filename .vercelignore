@@ -1,0 +1,6 @@
+.env.local
+.vercel-auth
+.npm-cache
+.next
+node_modules
+tsconfig.tsbuildinfo
