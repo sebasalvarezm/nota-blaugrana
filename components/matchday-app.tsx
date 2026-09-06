@@ -16,6 +16,7 @@ import { RatingBadge } from "@/components/rating-badge";
 import { Modal } from "@/components/modal";
 import { useRatingStore } from "@/components/use-rating-store";
 import { useSeasonAverages } from "@/components/use-season-averages";
+import { PositionEditor } from "@/components/position-editor";
 import { MatchEditor } from "@/components/match-editor";
 
 const LAST_MATCH_KEY = "nota-blaugrana-last-match-v2";
@@ -42,6 +43,7 @@ export function MatchdayApp() {
   const [activePlayerId, setActivePlayerId] = useState<string | null>(null);
   const [authOpen, setAuthOpen] = useState(false);
   const [editorOpen, setEditorOpen] = useState(false);
+  const [positionsOpen, setPositionsOpen] = useState(false);
   const [poster, setPoster] = useState<{ url: string; name: string } | null>(null);
   const [posterBusy, setPosterBusy] = useState(false);
   const [toast, setToast] = useState("");
@@ -57,11 +59,11 @@ export function MatchdayApp() {
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; requests.current += 1; }; }, []);
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(""), 5000); return () => clearTimeout(timer); }, [toast]);
 
-  const loadMatch = useCallback(async (selectedId?: string, background = false) => {
+  const loadMatch = useCallback(async (selectedId?: string, background = false, fresh = false) => {
     const request = ++requests.current;
     if (!background) setRefreshing(true);
     try {
-      const response = await fetch(`/api/matches/current${selectedId ? `?matchId=${encodeURIComponent(selectedId)}` : ""}`, { signal: AbortSignal.timeout(9000) });
+      const response = await fetch(`/api/matches/current${selectedId ? `?matchId=${encodeURIComponent(selectedId)}` : ""}${fresh ? `${selectedId ? "&" : "?"}fresh=${Date.now()}` : ""}`, { signal: AbortSignal.timeout(9000) });
       const payload = await response.json() as { match?: MatchData; matches?: MatchChoice[]; mode?: string };
       if (!mounted.current || request !== requests.current) return;
       if (!response.ok || !usableMatch(payload.match) || payload.mode !== "cloud") throw new Error("Match data unavailable");
@@ -190,6 +192,15 @@ export function MatchdayApp() {
     if (!response.ok) throw new Error("Could not save the match. Your edits remain in the form.");
     const result = await response.json(); await loadMatch(result.matchId); setEditorOpen(false); setToast("Match details saved.");
   }
+  async function savePositions(players: Player[]) {
+    if (!isAdmin) throw new Error("Owner access required");
+    const session = await getBrowserSupabase()?.auth.getSession();
+    const response = await fetch("/api/matches/positions", { method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${session?.data.session?.access_token || ""}`},
+      body:JSON.stringify({matchId:match.id,positions:players.map(player=>({player_id:player.id,role_code:player.role,role_label:player.roleLabel,pitch_x:player.x??null,pitch_y:player.y??null}))}),signal:AbortSignal.timeout(12_000)});
+    if (!response.ok) throw new Error("Positions could not be saved");
+    setMatch(previous=>({...previous,players})); setPositionsOpen(false); setToast("Positions saved for this match.");
+    await loadMatch(match.id,true,true);
+  }
   function chooseMatch(id: string) {
     posterGeneration.current += 1;
     setActivePlayerId(null); setPoster(null);
@@ -207,15 +218,16 @@ export function MatchdayApp() {
       {store.canRestore && <div className="notice"><span>Earlier ratings are saved on this device. Restore missing scores without replacing your current ratings.</span><button className="text-button" onClick={store.restore}>Restore saved ratings</button></div>}
       <div className="rating-toolbar"><div className="phase-switch" role="group" aria-label="Match phase">{(["ht", "ft"] as Phase[]).map((item) => <button key={item} onClick={() => { posterGeneration.current += 1; setPhase(item); setActivePlayerId(null); setPoster(null); }} aria-pressed={phase === item}>{item === "ht" ? "Half time" : "Full time"}</button>)}</div><div className="rating-progress"><span>{rated.length} / {eligible.length} players rated</span><progress value={progress} max="100" aria-label="Rating progress">{progress}%</progress></div></div>
       {provisional.length > 0 && <div className="phase-notice"><span>{provisional.length} HT {provisional.length === 1 ? "score needs" : "scores need"} your FT confirmation.</span><button className="text-button" onClick={() => { provisional.forEach((player) => store.update("ft", player.id, { ...store.ratings.ht[player.id], updatedAt: undefined })); setToast("Half-time scores confirmed for full time."); }}>Keep these HT scores</button></div>}
-      <div className="workspace"><section id="ratings" className="lineup-section" aria-labelledby="lineup-title"><div className="section-heading"><div><span className="eyebrow">Starting XI</span><h2 id="lineup-title">Choose a player</h2></div><span className="formation">{match.formation}</span></div>
+      <div className="workspace"><section id="ratings" className="lineup-section" aria-labelledby="lineup-title"><div className="section-heading"><div><span className="eyebrow">Starting XI</span><h2 id="lineup-title">Choose a player</h2></div><div className="lineup-actions">{isAdmin && match.source === "cloud" && <button className="text-button" onClick={() => setPositionsOpen(true)}>Edit positions</button>}<span className="formation">{match.formation}</span></div></div>
         {starters.length ? <div className={`pitch ${loading ? "is-loading" : ""}`} aria-label="Barcelona formation"><div className="pitch-circle" /><div className="pitch-box top" /><div className="pitch-box bottom" />{starters.map((player) => <button key={player.id} className="pitch-player" style={{ left: `${Math.max(12, Math.min(88, player.x ?? 50))}%`, top: `${Math.max(12, Math.min(88, player.y ?? 50))}%` }} onClick={() => setActivePlayerId(player.id)} disabled={!store.ready || loading} aria-label={`Rate ${player.name}${actualRatings[player.id]?.overall != null ? `, currently ${formatRating(actualRatings[player.id].overall)} out of ten` : ""}`}><span className="shirt-number">{player.number ?? "·"}</span><span className="pitch-player-name">{player.short}</span><RatingBadge value={actualRatings[player.id]?.overall} />{phase === "ft" && !isRated(actualRatings[player.id]) && isRated(store.ratings.ht[player.id]) && <small className="ht-draft">HT {formatRating(store.ratings.ht[player.id].overall)}</small>}</button>)}</div> : <div className="empty-state"><span className="empty-xi">XI</span><h3>Waiting for the lineup</h3><p>Choose a completed match or try the example while the starting XI is confirmed.</p><button className="button secondary" onClick={() => chooseMatch(DEMO_MATCH.id)}>Try the example</button></div>}
         <div className="section-heading bench-heading"><h3>Substitutes used</h3><span className="muted">{substitutes.length} players</span></div><div className="bench-list">{substitutes.map((player) => <button key={player.id} className="bench-player" onClick={() => setActivePlayerId(player.id)} disabled={!store.ready}><span className="bench-number">{player.number ?? "—"}</span><span className="bench-name"><strong>{player.name}</strong><small>On {player.minute ?? "—"}′ · {player.roleLabel}</small></span><RatingBadge value={actualRatings[player.id]?.overall} /></button>)}{!substitutes.length && <p className="empty-copy">No used substitutes recorded for this phase.</p>}</div>
       </section><aside className="summary-panel" aria-labelledby="summary-title"><div className="section-heading"><div><span className="eyebrow">Your verdict</span><h2 id="summary-title">My match</h2></div><span className="phase-label">{phase.toUpperCase()}</span></div><div className="team-average"><div><span>Team average</span><small>{rated.length ? `From ${rated.length} rated players` : "Rate a player to begin"}</small></div><RatingBadge value={average} large /></div><div className="community-line"><span>Community average</span><strong>{formatRating(crowdAverage)}</strong></div><div className="leaders"><div className="section-heading"><h3>MVPs</h3><span className="muted">Your highest ratings</span></div><ol>{rated.slice(0, 3).map(({ player, score }, index) => <li key={player.id}><span className="leader-rank">{index + 1}</span><div className="leader-copy"><strong>{player.name}</strong><small>{contributionLabel(contributions[player.id]) || player.roleLabel}</small></div><RatingBadge value={score} /></li>)}</ol>{!rated.length && <p className="empty-copy">Your top performers will appear here.</p>}</div><button className="button primary full-width" onClick={() => void openPoster()} disabled={!rated.length || posterBusy}>{posterBusy ? "Creating your image…" : "Preview Matchprint"}</button><p className="export-note">{remaining ? `${remaining} players still to rate. Partial sheets are labelled.` : "Your match sheet is complete."}</p><div className="save-status" role="status"><span className={store.pending ? "status-dot pending" : "status-dot"} /><span>{store.status}</span></div>{store.conflict ? <button className="text-button" onClick={() => store.retry(true)}>Keep this device’s edits and sync</button> : user && (store.pending > 0 || store.status.includes("unavailable")) && <button className="text-button" onClick={() => store.retry()}>Retry account sync</button>}{!user && <p className="guest-note">Guest ratings stay on this device. <button className="text-button" onClick={() => setAuthOpen(true)}>Sign in to sync</button></p>}</aside></div>
       {phase === "ft" && rated.length > 0 && <section className="season-section" aria-labelledby="season-title"><div className="section-heading"><div><span className="eyebrow">{seasonLabel(match.kickoff)}</span><h2 id="season-title">Against your season</h2></div><span className="muted">Previous full-time ratings</span></div><div className="season-list">{rated.map(({ player, score }) => <div key={player.id} className="season-player"><strong>{player.name}</strong><RatingBadge value={score} /><div><span>{season.unavailable ? "History unavailable" : seasonComparison(score, season.averages[player.id])}</span><small>{season.averages[player.id] ? `Season ${formatRating(season.averages[player.id].average)} · ${season.averages[player.id].matches} rated matches` : "Build your history by rating more matches"}</small></div></div>)}</div><p className="method-note">Your personal FT ratings, before this match. Season: July–June. At least 3 previous ratings are needed for a comparison.{Object.values(season.averages).some((item) => item.includesConverted) ? " Includes earlier /5 scores converted to /10." : ""}</p></section>}
-      <footer className="app-footer"><span>Nota Blaugrana · Independent fan ratings</span><span>{match.source === "demo" ? "Example data" : match.lastSyncedAt ? `Match data updated ${new Date(match.lastSyncedAt).toLocaleString()}` : "Match data awaiting refresh"}</span><span>Ratings /10 · G = goals · A = assists</span></footer>
+      <footer className="app-footer"><span>Nota Blaugrana · Independent fan ratings</span><span>{match.source === "demo" ? "Example data" : match.lastSyncedAt ? `Match data updated ${new Date(match.lastSyncedAt).toLocaleString()}` : "Match data awaiting refresh"}</span><span>Ratings /10 · Goals & assists</span></footer>
     </main>
     {activePlayer && store.ready && <PlayerRatingDialog key={`${scope}:${match.id}:${phase}:${activePlayer.id}`} player={activePlayer} phase={phase} rating={actualRatings[activePlayer.id]} saveStatus={store.status} halfTime={store.ratings.ht[activePlayer.id]} community={phaseCommunity.find((row) => row.player_id === activePlayer.id)} onChange={(rating) => store.update(phase, activePlayer.id, rating)} onClear={() => store.update(phase, activePlayer.id, null)} onClose={() => setActivePlayerId(null)} onNext={nextPlayer} />}
     {authOpen && <AccountDialog user={user} onClose={() => setAuthOpen(false)} />}
+    {positionsOpen && isAdmin && <PositionEditor key={match.id} match={match} onSave={savePositions} onClose={() => setPositionsOpen(false)} />}
     {editorOpen && isAdmin && <MatchEditor match={match} onClose={() => setEditorOpen(false)} onSave={saveManual} />}
     {poster && <Modal labelId="poster-title" className="poster-dialog" onClose={() => setPoster(null)}><div className="dialog-heading"><div><span className="eyebrow">Ready to share</span><h2 id="poster-title">Your Matchprint</h2></div><button className="icon-button" onClick={() => setPoster(null)} aria-label="Close Matchprint">×</button></div>
       {/* This PNG is created on the device and contains no external image assets. */}

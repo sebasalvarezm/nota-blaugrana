@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { MatchData, Phase, PlayerRating, RatingsState } from "@/lib/types";
 import { emptyRatings, normalizeRatings } from "@/lib/ratings";
+import { ratingTemplates } from "@/lib/rating-templates";
 import { getBrowserSupabase } from "@/lib/supabase/browser";
 import { mergeAccountRatings, pendingKey, ratingKey, readStoredRatings, type PendingRating, type StoredRatings } from "@/lib/rating-storage";
 
@@ -160,6 +161,13 @@ export function useRatingStore(match: MatchData, scope: string, enabled: boolean
     const store = current.current;
     if (!store || store.disposed || !store.ready || store.scope !== scope || store.match.id !== match.id) return;
     const existing = store.ratings[phase][playerId];
+    // Owner position corrections can change role templates. Keep the overall
+    // score, but send only optional attributes valid for the corrected role.
+    const player = match.players.find((item) => item.id === playerId);
+    if (rating && player) {
+      const fields = new Set(ratingTemplates[player.role].map(([field]) => field));
+      rating = { ...rating, attributes: Object.fromEntries(Object.entries(rating.attributes).filter(([field]) => fields.has(field))) };
+    }
     const key = pendingKey(phase, playerId);
     const expectedUpdatedAt = store.pending[key]?.expectedUpdatedAt ?? existing?.updatedAt ?? null;
     if (rating) store.ratings[phase][playerId] = { ...rating, updatedAt: existing?.updatedAt };
