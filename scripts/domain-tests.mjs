@@ -17,12 +17,12 @@ function load(name) {
   const { outputText } = ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   });
-  const module = { exports: {} };
-  modules.set(file, module.exports);
+  const loaded = { exports: {} };
+  modules.set(file, loaded.exports);
   const require = (id) => id.startsWith("@/") ? load(id) : nativeRequire(id);
   new vm.Script(`(function(require,module,exports){${outputText}\n})`, { filename: file })
-    .runInThisContext()(require, module, module.exports);
-  return module.exports;
+    .runInThisContext()(require, loaded, loaded.exports);
+  return loaded.exports;
 }
 
 const { playerName, shortPlayerName } = load("lib/player-names");
@@ -72,3 +72,19 @@ assert.equal(ratingBand(8.5), "excellent");
 assert.equal(ratingBand(8.46), "excellent");
 assert.equal(formatRating(8.5), "8.5");
 console.log("Scale migration, averages and colour boundary checks passed.");
+
+const { mergeAccountRatings, ratingKey } = load("lib/rating-storage");
+const local = { ht:{}, ft:{ a:{overall:8,attributes:{}} } };
+const remote = { ht:{}, ft:{ a:{overall:7,attributes:{}}, b:{overall:6,attributes:{}} } };
+const pending = { "ft:a":{ phase:"ft",playerId:"a",rating:local.ft.a,expectedUpdatedAt:null,revision:1 }, "ft:b":{phase:"ft",playerId:"b",rating:null,expectedUpdatedAt:null,revision:2} };
+assert.deepEqual(mergeAccountRatings(local, remote, pending), local);
+assert.deepEqual(mergeAccountRatings(local, remote, {}), remote);
+assert.notEqual(ratingKey("guest", "m"), ratingKey("account", "m"));
+const { seasonStart, seasonComparison } = load("lib/season");
+assert.equal(new Date(seasonStart("2026-06-30T23:59:00Z")).toISOString(), "2025-07-01T00:00:00.000Z");
+assert.equal(seasonComparison(8, {average:7.5,matches:3}), "↑ 0.5 vs season");
+assert.equal(seasonComparison(8, {average:7.5,matches:2}), "Limited history · 2");
+const { halftimeScoreFromEvents } = load("lib/match-events");
+assert.deepEqual(halftimeScoreFromEvents([{type:"Goal",time:45,overloadTime:3,newScore:[1,0]},{type:"Goal",time:70,newScore:[2,0]}]), [1,0]);
+assert.equal(halftimeScoreFromEvents([{type:"Goal",newScore:[1,0]}]), null);
+console.log("Save merge, account separation, season and HT checks passed.");
