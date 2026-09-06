@@ -25,6 +25,17 @@ export type Team = {
   logoUrl?: string | null;
 };
 
+export type MatchEvent = {
+  id: string;
+  playerId: string | null;
+  assistPlayerId: string | null;
+  type: string;
+  detail: string | null;
+  minute: number | null;
+  extraMinute: number | null;
+  period: "first" | "second" | "extra" | "shootout" | "unknown";
+};
+
 export type MatchData = {
   id: string;
   providerId?: number | null;
@@ -38,6 +49,10 @@ export type MatchData = {
   away: Team;
   homeScore: number | null;
   awayScore: number | null;
+  halftimeHomeScore?: number | null;
+  halftimeAwayScore?: number | null;
+  events?: MatchEvent[];
+  eventsAvailable?: boolean;
   formation: string;
   players: Player[];
   source: "demo" | "cloud";

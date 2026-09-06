@@ -2,6 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Role } from "@/lib/types";
 import { playerName } from "@/lib/player-names";
+import { eventPeriod } from "@/lib/match-events";
 
 const FOTMOB_BASE = "https://www.fotmob.com";
 const FOTMOB_TEAM_ID = Number(process.env.FOTMOB_TEAM_ID || 8634);
@@ -74,6 +75,12 @@ type FotmobEvent = {
   goalDescription?: string | null;
   assistPlayerId?: number;
   assistStr?: string | null;
+  halfStrShort?: string;
+  period?: string | number;
+  isOwnGoal?: boolean;
+  isCancelled?: boolean;
+  isPenaltyShootout?: boolean;
+  newScore?: string | number[];
 };
 
 type FotmobMatchPage = {
@@ -395,6 +402,9 @@ function eventDetail(event: FotmobEvent) {
     return `${event.swap[1]?.name || "Player"} → ${event.swap[0]?.name || "Player"}`;
   }
   if (event.type === "Card") return event.cardDescription || event.card || "Card";
+  if (event.isCancelled) return "Cancelled";
+  if (event.isOwnGoal) return "Own goal";
+  if (event.isPenaltyShootout) return "Penalty shootout";
   if (event.type === "Goal") return event.goalDescription || "Goal";
   return event.type;
 }
@@ -405,6 +415,7 @@ async function importEvents(
   match: { home_team_id: string; away_team_id: string },
   events: FotmobEvent[],
 ) {
+  const rows = [];
   for (let index = 0; index < events.length; index += 1) {
     const event = events[index];
     const people = eventPeople(event);
@@ -414,7 +425,7 @@ async function importEvents(
     ]);
     const eventKey = `fotmob:${event.eventId || event.reactKey || `${event.type}:${event.time || 0}:${index}`}`;
     const teamId = event.isHome == null ? null : event.isHome ? match.home_team_id : match.away_team_id;
-    const { error } = await supabase.from("match_events").upsert({
+    rows.push({
       match_id: matchId,
       event_key: eventKey,
       minute: event.time ?? null,
@@ -425,9 +436,12 @@ async function importEvents(
       type: event.type.toLowerCase(),
       detail: eventDetail(event),
       comments: null,
-    }, { onConflict: "match_id,event_key" });
-    if (error) throw error;
+      period: event.isPenaltyShootout ? "shootout" : eventPeriod(event.halfStrShort ?? event.period, event.time ?? null, event.overloadTime ?? 0),
+    });
   }
+  // Replace a complete provider snapshot atomically so removed/VAR-cancelled goals disappear.
+  const { error } = await supabase.rpc("replace_fotmob_events", { target_match_id: matchId, event_rows: rows });
+  if (error) throw error;
 }
 
 async function importMatchDetail(
@@ -471,7 +485,9 @@ async function importMatchDetail(
   if (updateError) throw updateError;
 
   const lineupFound = await importLineup(supabase, saved.id, barcaTeamId, lineup);
-  await importEvents(supabase, saved.id, saved, events);
+  if (Array.isArray(detail.content?.matchFacts?.events?.events)) {
+    await importEvents(supabase, saved.id, saved, events);
+  }
   return { lineupFound, eventCount: events.length };
 }
 

@@ -1,9 +1,11 @@
 import type { MatchData, Phase, Player, PlayerRating } from "@/lib/types";
+import { contributionLabel, contributionsFor, type Contributions } from "@/lib/match-events";
 
 export type MatchprintPlayer = {
   player: Player;
   rating?: PlayerRating;
   halfTimeRating?: PlayerRating;
+  contributions?: Contributions;
 };
 
 type MatchprintInput = {
@@ -300,6 +302,11 @@ function drawJersey(ctx: CanvasRenderingContext2D, item: MatchprintPlayer | unde
   ctx.font = '720 16px Manrope, "Segoe UI", Arial, sans-serif';
   fitSans(ctx, item?.player.name || `MVP ${rank}`, 220, 16, 720);
   ctx.fillText(item ? `#${rank}  ${item.player.name}` : `MVP ${rank}`, centerX, top + 251);
+  if (item) {
+    ctx.fillStyle = COLORS.quiet;
+    ctx.font = '600 14px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(contributionLabel(item.contributions), centerX, top + 274);
+  }
   ctx.textAlign = "left";
 }
 
@@ -337,8 +344,11 @@ function drawSquadRatings(
     ctx.font = '650 12px Manrope, "Segoe UI", Arial, sans-serif';
     ctx.fillText(item.player.number == null ? "—" : String(item.player.number).padStart(2, "0"), x, y);
     ctx.fillStyle = COLORS.ink;
-    fitSans(ctx, name, 250, 16, 670);
+    fitSans(ctx, name, 190, 16, 670);
     ctx.fillText(name, x + 38, y);
+    ctx.fillStyle = COLORS.quiet;
+    ctx.font = '600 11px "Segoe UI", Arial, sans-serif';
+    ctx.fillText(contributionLabel(item.contributions), x + 235, y);
 
     ctx.textAlign = "right";
     ctx.fillStyle = score != null && score >= 4 ? COLORS.gold : score == null ? COLORS.quiet : COLORS.ink;
@@ -380,6 +390,8 @@ function drawSmallStar(ctx: CanvasRenderingContext2D, centerX: number, centerY: 
 }
 
 export function buildMatchprintCanvas({ match, phase, players, featuredPlayerIds }: MatchprintInput) {
+  const contributions = contributionsFor(match.events, phase);
+  players = players.map((item) => ({ ...item, contributions: contributions[item.player.id] }));
   const canvas = document.createElement("canvas");
   canvas.width = 1080;
   canvas.height = 1350;

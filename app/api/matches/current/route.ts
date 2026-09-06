@@ -3,6 +3,7 @@ import { DEMO_MATCH } from "@/lib/demo-data";
 import { getServerSupabase } from "@/lib/supabase/server";
 import type { MatchData, Player, Role, Team } from "@/lib/types";
 import { playerName, shortPlayerName } from "@/lib/player-names";
+import { eventPeriod } from "@/lib/match-events";
 
 export const dynamic = "force-dynamic";
 
@@ -30,6 +31,9 @@ type MatchRow = {
   status_short: string | null;
   home_score: number | null;
   away_score: number | null;
+  halftime_home_score: number | null;
+  halftime_away_score: number | null;
+  provider_payload: { eventsSyncedAt?: string } | null;
   formation: string | null;
   synced_at: string | null;
   competition: CompetitionRow | CompetitionRow[] | null;
@@ -87,6 +91,9 @@ function normalizeMatch(row: MatchRow): MatchData {
     away: teamFrom(one(row.away_team)),
     homeScore: row.home_score,
     awayScore: row.away_score,
+    halftimeHomeScore: row.halftime_home_score,
+    halftimeAwayScore: row.halftime_away_score,
+    eventsAvailable: Boolean(row.provider_payload?.eventsSyncedAt),
     formation: row.formation || "Lineup pending",
     players,
     source: "cloud",
@@ -95,7 +102,7 @@ function normalizeMatch(row: MatchRow): MatchData {
 }
 
 const matchSelect = `
-  id, provider_id, kickoff_at, venue, status, status_short, home_score, away_score, formation, synced_at,
+  id, provider_id, kickoff_at, venue, status, status_short, home_score, away_score, halftime_home_score, halftime_away_score, provider_payload, formation, synced_at,
   competition:competitions(name),
   home_team:clubs!matches_home_team_id_fkey(id, provider_id, name, short_name, logo_url),
   away_team:clubs!matches_away_team_id_fkey(id, provider_id, name, short_name, logo_url),
@@ -135,5 +142,14 @@ export async function GET() {
   }
   if (!result.data) return NextResponse.json({ match: DEMO_MATCH, mode: "cloud-empty" });
 
-  return NextResponse.json({ match: normalizeMatch(result.data as unknown as MatchRow), mode: "cloud" });
+  const match = normalizeMatch(result.data as unknown as MatchRow);
+  const { data: events, error: eventError } = await supabase.from("match_events")
+    .select("event_key, player_id, assist_player_id, type, detail, minute, extra_minute, period").eq("match_id", match.id);
+  match.events = (events || []).map((event) => ({
+    id: event.event_key, playerId: event.player_id, assistPlayerId: event.assist_player_id,
+    type: event.type, detail: event.detail, minute: event.minute, extraMinute: event.extra_minute,
+    period: event.period === "unknown" ? eventPeriod(null, event.minute, event.extra_minute) : event.period,
+  }));
+  if (eventError) match.eventsAvailable = false;
+  return NextResponse.json({ match, mode: "cloud" });
 }

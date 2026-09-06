@@ -32,3 +32,20 @@ assert.equal(playerName("Fermín López"), "Fermín López");
 assert.equal(playerName(null), "");
 assert.equal(shortPlayerName("assist by Lamine Yamal"), "Lamine Yamal");
 console.log("Player identity checks passed.");
+
+const { contributionsFor, eventPeriod } = load("lib/match-events");
+const goal = { id:"g1", type:"goal", playerId:"scorer", assistPlayerId:"helper", detail:"Goal", minute:45, extraMinute:2, period:"first" };
+const eventExamples = [goal, goal,
+  { ...goal, id:"g2", minute:75, period:"second" },
+  { ...goal, id:"own", detail:"Own goal" },
+  { ...goal, id:"cancelled", detail:"Goal cancelled" },
+  { ...goal, id:"sub", type:"substitution" },
+  { ...goal, id:"shootout", period:"shootout" },
+];
+assert.deepEqual(contributionsFor(eventExamples, "ht"), { scorer:{goals:1, assists:0}, helper:{goals:0, assists:1} });
+assert.deepEqual(contributionsFor(eventExamples, "ft"), { scorer:{goals:2, assists:0}, helper:{goals:0, assists:2} });
+assert.equal(eventPeriod(null, 45, 3), "first");
+assert.equal(eventPeriod("1H", 47), "first");
+assert.equal(eventPeriod("PEN", 120), "shootout");
+assert.deepEqual(contributionsFor([], "ft"), {});
+console.log("Goal/assist and stoppage-time checks passed.");
