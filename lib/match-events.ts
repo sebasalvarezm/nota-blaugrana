@@ -39,3 +39,15 @@ export function contributionsFor(events: MatchEvent[] | undefined, phase: Phase)
 export function contributionLabel(value?: Contributions): string {
   return [value?.goals ? `G ${value.goals}` : "", value?.assists ? `A ${value.assists}` : ""].filter(Boolean).join(" · ");
 }
+
+export function halftimeScoreFromEvents(events: Array<{ type: string; time?: number; overloadTime?: number | null; halfStrShort?: string; period?: string | number; isCancelled?: boolean; isPenaltyShootout?: boolean; goalDescription?: string | null; newScore?: string | number[] }>): [number, number] | null {
+  if (events.some((event) => event.type === "Goal" && !event.isCancelled && !event.isPenaltyShootout && eventPeriod(event.halfStrShort ?? event.period, event.time ?? null) === "unknown")) return null;
+  const goals = events.filter((event) => event.type === "Goal" && !event.isCancelled && !event.isPenaltyShootout
+    && !/cancel|disallow/i.test(event.goalDescription || "")
+    && eventPeriod(event.halfStrShort ?? event.period, event.time ?? null, event.overloadTime ?? 0) === "first")
+    .sort((a, b) => (a.time ?? 0) - (b.time ?? 0) || (a.overloadTime ?? 0) - (b.overloadTime ?? 0));
+  if (!goals.length) return [0, 0];
+  const raw = goals.at(-1)?.newScore;
+  const values = Array.isArray(raw) ? raw : typeof raw === "string" ? raw.match(/^\s*(\d+)\s*[-:]\s*(\d+)\s*$/)?.slice(1).map(Number) : null;
+  return values?.length === 2 && values.every((value) => Number.isSafeInteger(value) && value >= 0 && value <= 50) ? [values[0], values[1]] : null;
+}

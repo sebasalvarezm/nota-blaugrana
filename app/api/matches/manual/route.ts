@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getServerSupabase, hasSupabaseServerConfig } from "@/lib/supabase/server";
 import type { MatchData, Team } from "@/lib/types";
+import { playerName } from "@/lib/player-names";
+import { ratingTemplates } from "@/lib/rating-templates";
 
 export const dynamic = "force-dynamic";
 
@@ -38,9 +40,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "This account cannot manage matches." }, { status: 403 });
   }
 
-  const body = (await request.json()) as MatchData;
-  if (!body.home?.name || !body.away?.name || !body.kickoff || !body.players?.length) {
+  const body = await request.json().catch(() => null) as MatchData | null;
+  if (!body || typeof body.id !== "string" || !body.home?.name || !body.away?.name || !Number.isFinite(Date.parse(body.kickoff)) || !Array.isArray(body.players)) {
     return NextResponse.json({ error: "Match, kickoff, and lineup are required." }, { status: 400 });
+  }
+  const bounded = (value: unknown, max: number) => value == null || (typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= max);
+  if (body.players.length > 30 || body.players.filter((player) => player.starter).length !== 11
+    || new Set(body.players.map((player) => player.id)).size !== body.players.length
+    || body.players.some((player) => !playerName(player.name) || player.name.length > 80 || !(player.role in ratingTemplates) || !bounded(player.number, 99))
+    || ![body.homeScore, body.awayScore, body.halftimeHomeScore, body.halftimeAwayScore].every((score) => bounded(score, 50))
+    || !["NS", "1H", "HT", "2H", "ET", "LIVE", "FT", "AET", "PEN", "PST"].includes(body.statusShort)
+    || (body.home.providerId !== 529 && body.away.providerId !== 529)) {
+    return NextResponse.json({ error: "Check the scores and complete starting XI before saving." }, { status: 400 });
   }
 
   const supabase = getServerSupabase(true);
@@ -88,6 +99,8 @@ export async function POST(request: NextRequest) {
       status_short: body.statusShort,
       home_score: body.homeScore,
       away_score: body.awayScore,
+      halftime_home_score: body.halftimeHomeScore ?? null,
+      halftime_away_score: body.halftimeAwayScore ?? null,
       formation: body.formation,
       provider_payload: { source: "manual" },
       synced_at: new Date().toISOString(),
@@ -98,8 +111,6 @@ export async function POST(request: NextRequest) {
       const { data, error } = await supabase.from("matches").update(matchValues).eq("id", body.id).select("id").single();
       if (error) throw error;
       matchId = data.id;
-      const { error: clearError } = await supabase.from("match_players").delete().eq("match_id", matchId);
-      if (clearError) throw clearError;
     } else {
       const { data, error } = await supabase.from("matches").insert(matchValues).select("id").single();
       if (error) throw error;
@@ -107,20 +118,27 @@ export async function POST(request: NextRequest) {
     }
 
     const barcaTeamId = body.home.providerId === 529 ? homeTeamId : awayTeamId;
-    let savedPlayers = 0;
+    const lineupRows = [];
     for (const player of body.players) {
-      const { data: existingPlayers } = await supabase.from("players").select("id").eq("name", player.name).limit(1);
+      // Retain the player's stable identity when correcting a name.
+      let lookup = supabase.from("players").select("id");
+      lookup = isUuid(player.id) ? lookup.eq("id", player.id) : player.providerId ? lookup.eq("provider_id", player.providerId) : lookup.eq("name", playerName(player.name));
+      const { data: existingPlayers, error: lookupError } = await lookup.limit(1);
+      if (lookupError) throw lookupError;
       let playerId = existingPlayers?.[0]?.id as string | undefined;
       if (!playerId) {
         const { data, error } = await supabase
           .from("players")
-          .insert({ name: player.name, default_position: player.role })
+          .insert({ name: playerName(player.name), default_position: player.role })
           .select("id")
           .single();
         if (error) throw error;
         playerId = data.id;
+      } else {
+        const { error } = await supabase.from("players").update({ name: playerName(player.name) }).eq("id", playerId);
+        if (error) throw error;
       }
-      const { error } = await supabase.from("match_players").insert({
+      lineupRows.push({
         match_id: matchId,
         player_id: playerId,
         team_id: barcaTeamId,
@@ -133,17 +151,12 @@ export async function POST(request: NextRequest) {
         pitch_x: player.x ?? null,
         pitch_y: player.y ?? null,
       });
-      if (error) throw error;
-      savedPlayers += 1;
     }
+    const { error: lineupError } = await supabase.rpc("replace_fotmob_lineup", { target_match_id: matchId, lineup_rows: lineupRows, match_formation: body.formation });
+    if (lineupError) throw lineupError;
 
-    return NextResponse.json({ ok: true, matchId, savedPlayers });
-  } catch (error) {
-    const message = error instanceof Error
-      ? error.message
-      : error && typeof error === "object" && "message" in error
-        ? String(error.message)
-        : "Could not save the manual match";
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ ok: true, matchId, savedPlayers: lineupRows.length });
+  } catch {
+    return NextResponse.json({ error: "Could not save the match. Please retry." }, { status: 500 });
   }
 }

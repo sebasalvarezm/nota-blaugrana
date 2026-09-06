@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { DEMO_MATCH } from "@/lib/demo-data";
 import { getServerSupabase } from "@/lib/supabase/server";
 import type { MatchData, Player, Role, Team } from "@/lib/types";
@@ -56,7 +56,7 @@ function normalizeMatch(row: MatchRow): MatchData {
   const timeZone = process.env.NEXT_PUBLIC_TIMEZONE || "America/New_York";
   const kickoff = new Date(row.kickoff_at);
   const date = new Intl.DateTimeFormat("en-US", {
-    weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone,
+    weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit", timeZone, timeZoneName: "short",
   }).format(kickoff);
 
   const players: Player[] = (row.match_players || []).map((entry) => {
@@ -110,35 +110,34 @@ const matchSelect = `
     player:players(id, provider_id, name, photo_url))
 `;
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const supabase = getServerSupabase();
   if (!supabase) return NextResponse.json({ match: DEMO_MATCH, mode: "local" });
 
   const { data: barca } = await supabase.from("clubs").select("id").eq("provider_id", 529).maybeSingle();
   if (!barca) return NextResponse.json({ match: DEMO_MATCH, mode: "cloud-empty" });
 
-  const recentCutoff = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
-  const query = supabase
+  const selectedId = request.nextUrl.searchParams.get("matchId");
+  if (selectedId && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(selectedId)) return NextResponse.json({ error: "Invalid match" }, { status: 400 });
+  const { data: recent, error: recentError } = await supabase.from("matches")
+    .select("id, kickoff_at, status, home_score, away_score, formation, home_team:clubs!matches_home_team_id_fkey(short_name), away_team:clubs!matches_away_team_id_fkey(short_name)")
+    .or(`home_team_id.eq.${barca.id},away_team_id.eq.${barca.id}`)
+    .lte("kickoff_at", new Date(Date.now() + 7 * 86400000).toISOString()).order("kickoff_at", { ascending: false }).limit(24);
+  if (recentError) return NextResponse.json({ mode: "cloud-error" }, { status: 503 });
+  const recentRows = recent || [];
+  const active = recentRows.find((row) => ["live", "halftime"].includes(row.status));
+  const imminent = recentRows.find((row) => row.status === "scheduled" && row.formation && Math.abs(new Date(row.kickoff_at).getTime() - Date.now()) < 2 * 3600000);
+  const latest = recentRows.find((row) => row.status === "finished" && row.formation);
+  const targetId = selectedId || active?.id || imminent?.id || latest?.id || recentRows.at(-1)?.id;
+  if (!targetId) return NextResponse.json({ match: DEMO_MATCH, mode: "cloud-empty" });
+  const result = await supabase
     .from("matches")
     .select(matchSelect)
     .or(`home_team_id.eq.${barca.id},away_team_id.eq.${barca.id}`)
-    .gte("kickoff_at", recentCutoff)
-    .order("kickoff_at", { ascending: true })
-    .limit(1);
-
-  let result = await query.maybeSingle();
-  if (!result.data && !result.error) {
-    result = await supabase
-      .from("matches")
-      .select(matchSelect)
-      .or(`home_team_id.eq.${barca.id},away_team_id.eq.${barca.id}`)
-      .order("kickoff_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-  }
+    .eq("id", targetId).maybeSingle();
 
   if (result.error) {
-    return NextResponse.json({ match: DEMO_MATCH, mode: "cloud-error", error: result.error.message }, { status: 200 });
+    return NextResponse.json({ mode: "cloud-error" }, { status: 503 });
   }
   if (!result.data) return NextResponse.json({ match: DEMO_MATCH, mode: "cloud-empty" });
 
@@ -151,5 +150,6 @@ export async function GET() {
     period: event.period === "unknown" ? eventPeriod(null, event.minute, event.extra_minute) : event.period,
   }));
   if (eventError) match.eventsAvailable = false;
-  return NextResponse.json({ match, mode: "cloud" });
+  const matches = recentRows.map((row) => ({ id: row.id, label: `${new Date(row.kickoff_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" })} · ${one(row.home_team)?.short_name || "Home"} ${row.home_score ?? "—"}–${row.away_score ?? "—"} ${one(row.away_team)?.short_name || "Away"}` }));
+  return NextResponse.json({ match, matches, mode: "cloud" }, { headers: { "Cache-Control": "public, max-age=15, s-maxage=30, stale-while-revalidate=60" } });
 }

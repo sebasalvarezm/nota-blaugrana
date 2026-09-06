@@ -4,7 +4,7 @@ import { getServerSupabase, hasSupabaseServerConfig } from "@/lib/supabase/serve
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 async function authorize(request: NextRequest) {
   const authorization = request.headers.get("authorization") || "";
@@ -61,17 +61,25 @@ async function run(request: NextRequest) {
     return NextResponse.json({ error: "This account is not allowed to sync match data." }, { status: 403 });
   }
 
+  const supabase = getServerSupabase(true);
+  let claimed = false;
+  let succeeded = false;
   try {
-    const supabase = getServerSupabase(true);
     if (!supabase) throw new Error("Supabase service connection is unavailable");
     if (publicAutoRefresh && !(await shouldRunPublicRefresh(supabase))) {
       return NextResponse.json({ ok: true, actor: "automatic", skipped: true, syncedAt: new Date().toISOString() });
     }
+    const lease = await supabase.rpc("claim_football_sync", { min_interval_seconds: publicAutoRefresh ? 120 : 60 });
+    if (lease.error) throw lease.error;
+    if (!lease.data) return NextResponse.json({ ok: true, skipped: true });
+    claimed = true;
     const result = await syncBarcelonaFree(supabase);
-    return NextResponse.json({ ok: true, actor: auth.ok ? auth.actor : "automatic", ...result, syncedAt: new Date().toISOString() });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Match sync failed";
-    return NextResponse.json({ error: message }, { status: 502 });
+    succeeded = true;
+    return NextResponse.json({ ok: true, ...result, syncedAt: new Date().toISOString() });
+  } catch {
+    return NextResponse.json({ error: "Match updates are temporarily unavailable." }, { status: 502 });
+  } finally {
+    if (claimed && supabase) await supabase.rpc("finish_football_sync", { succeeded });
   }
 }
 

@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Role } from "@/lib/types";
 import { playerName } from "@/lib/player-names";
-import { eventPeriod } from "@/lib/match-events";
+import { eventPeriod, halftimeScoreFromEvents } from "@/lib/match-events";
 
 const FOTMOB_BASE = "https://www.fotmob.com";
 const FOTMOB_TEAM_ID = Number(process.env.FOTMOB_TEAM_ID || 8634);
@@ -291,7 +291,6 @@ async function upsertFixture(supabase: SupabaseClient, fixture: FotmobFixture, s
       status_short: statusShort(fixture.status),
       home_score: score.home,
       away_score: score.away,
-      provider_payload: { source: "fotmob-public-page", fixture, pageUrl: fixture.pageUrl },
       provider_updated_at: now,
       synced_at: now,
     }, { onConflict: "provider_id" })
@@ -340,8 +339,7 @@ async function importLineup(
   const starters = lineup?.starters || [];
   if (starters.length < 11) return false;
 
-  const { error: clearError } = await supabase.from("match_players").delete().eq("match_id", matchId);
-  if (clearError) throw clearError;
+  const rows: Array<{ player_id: string; starter: boolean } & Record<string, unknown>> = [];
 
   const savePlayer = async (player: FotmobPlayer, starter: boolean) => {
     const playerId = await upsertPlayer(supabase, player, player.usualPlayingPositionId);
@@ -352,7 +350,7 @@ async function importLineup(
     const layout = player.verticalLayout;
     const pitchX = layout ? Math.max(7, Math.min(93, Number((layout.x * 100).toFixed(2)))) : null;
     const pitchY = layout ? Math.max(9, Math.min(91, Number(((1 - layout.y) * 100).toFixed(2)))) : null;
-    const { error } = await supabase.from("match_players").upsert({
+    rows.push({
       match_id: matchId,
       player_id: playerId,
       team_id: barcaTeamId,
@@ -367,17 +365,14 @@ async function importLineup(
       grid: layout ? `${Math.round(layout.y * 100)}:${Math.round(layout.x * 100)}` : null,
       pitch_x: pitchX,
       pitch_y: pitchY,
-    }, { onConflict: "match_id,player_id" });
-    if (error) throw error;
+    });
   };
 
   for (const player of starters) await savePlayer(player, true);
   for (const player of lineup?.subs || []) await savePlayer(player, false);
 
-  const { error } = await supabase
-    .from("matches")
-    .update({ formation: lineup?.formation || null, synced_at: new Date().toISOString() })
-    .eq("id", matchId);
+  if (rows.filter((row) => row.starter).length !== 11) throw new Error("The complete starting XI could not be resolved");
+  const { error } = await supabase.rpc("replace_fotmob_lineup", { target_match_id: matchId, lineup_rows: rows, match_formation: lineup?.formation || null });
   if (error) throw error;
   return true;
 }
@@ -440,7 +435,7 @@ async function importEvents(
     });
   }
   // Replace a complete provider snapshot atomically so removed/VAR-cancelled goals disappear.
-  const { error } = await supabase.rpc("replace_fotmob_events", { target_match_id: matchId, event_rows: rows });
+  const { error } = await supabase.rpc("replace_fotmob_events", { target_match_id: matchId, event_rows: Array.from(new Map(rows.map((row) => [row.event_key, row])).values()) });
   if (error) throw error;
 }
 
@@ -464,6 +459,9 @@ async function importMatchDetail(
   const awayScore = headerStatus.started || headerStatus.finished ? scoreTeams[1]?.score ?? null : null;
   const venue = detail.content?.matchFacts?.infoBox?.Stadium?.name || null;
   const elapsed = events.reduce((latest, event) => Math.max(latest, event.time || 0), 0) || null;
+  const halfTime = statusShort(headerStatus) === "HT" && homeScore != null && awayScore != null
+    ? [homeScore, awayScore]
+    : headerStatus.finished && Array.isArray(detail.content?.matchFacts?.events?.events) ? halftimeScoreFromEvents(events) : null;
 
   const { error: updateError } = await supabase.from("matches").update({
     venue,
@@ -472,6 +470,7 @@ async function importMatchDetail(
     elapsed,
     home_score: homeScore,
     away_score: awayScore,
+    ...(halfTime ? { halftime_home_score: halfTime[0], halftime_away_score: halfTime[1] } : {}),
     provider_payload: {
       source: "fotmob-public-page",
       fixture,
@@ -514,7 +513,8 @@ export async function syncBarcelonaFree(supabase: SupabaseClient) {
   const candidates = fixtures
     .filter((fixture) => Math.abs(new Date(fixture.status.utcTime).getTime() - now.getTime()) <= 36 * 60 * 60 * 1000)
     .sort((a, b) => Math.abs(new Date(a.status.utcTime).getTime() - now.getTime()) - Math.abs(new Date(b.status.utcTime).getTime() - now.getTime()));
-  const target = candidates[0];
+  const target = candidates[0] || fixtures.filter((fixture) => fixture.status.finished)
+    .sort((a, b) => new Date(b.status.utcTime).getTime() - new Date(a.status.utcTime).getTime())[0];
   let detail = { lineupFound: false, eventCount: 0 };
   if (target) {
     const saved = imported.get(target.id);
