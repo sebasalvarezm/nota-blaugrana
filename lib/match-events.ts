@@ -37,7 +37,7 @@ export function contributionsFor(events: MatchEvent[] | undefined, phase: Phase)
 }
 
 export function contributionLabel(value?: Contributions): string {
-  return [value?.goals ? `G ${value.goals}` : "", value?.assists ? `A ${value.assists}` : ""].filter(Boolean).join(" · ");
+  return [value?.goals ? `${value.goals} ${value.goals === 1 ? "Goal" : "Goals"}` : "", value?.assists ? `${value.assists} ${value.assists === 1 ? "Assist" : "Assists"}` : ""].filter(Boolean).join(" · ");
 }
 
 export function halftimeScoreFromEvents(events: Array<{ type: string; time?: number; overloadTime?: number | null; halfStrShort?: string; period?: string | number; isCancelled?: boolean; isPenaltyShootout?: boolean; goalDescription?: string | null; newScore?: string | number[] }>): [number, number] | null {
