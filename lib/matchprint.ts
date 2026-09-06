@@ -52,6 +52,24 @@ function badge(ctx: CanvasRenderingContext2D, value: number | null | undefined, 
   text(ctx, formatRating(value), x + width / 2, y + (large ? 36 : 25), large ? 32 : 23, colors.foreground, 600);
   ctx.textAlign = "left";
 }
+function jersey(ctx: CanvasRenderingContext2D, player: Player, x: number, y: number) {
+  // Draw directly into the PNG: no remote kit images, loading race or CORS.
+  ctx.save(); ctx.translate(x, y);
+  ctx.beginPath(); ctx.moveTo(-25, 0); ctx.quadraticCurveTo(0, 17, 25, 0);
+  ctx.lineTo(65, 24); ctx.lineTo(48, 63); ctx.lineTo(32, 55); ctx.lineTo(30, 141);
+  ctx.quadraticCurveTo(0, 149, -30, 141); ctx.lineTo(-32, 55); ctx.lineTo(-48, 63); ctx.lineTo(-65, 24); ctx.closePath();
+  ctx.save(); ctx.clip();
+  ctx.fillStyle = player.role === "GK" ? "#216b62" : "#15539a"; ctx.fillRect(-70, 0, 140, 150);
+  ctx.fillStyle = player.role === "GK" ? "#174c49" : "#982849";
+  for (let stripe = -54; stripe < 70; stripe += 36) ctx.fillRect(stripe, 0, 18, 150);
+  ctx.restore(); ctx.strokeStyle = "#10243b"; ctx.lineWidth = 2; ctx.stroke();
+  ctx.textAlign = "center";
+  fittedText(ctx, playerName(player.name).split(" ").at(-1)?.toUpperCase() || "BARÇA", 0, 49, 65, 14, "#fff0b1", 600);
+  ctx.font = `600 49px ${FONT}`; ctx.lineWidth = 3; ctx.strokeStyle = "#10243b";
+  ctx.strokeText(player.number == null ? "—" : String(player.number), 0, 107);
+  text(ctx, player.number == null ? "—" : String(player.number), 0, 107, 49, "#fff0b1", 600);
+  ctx.restore();
+}
 function signature(input: MatchprintInput) {
   const payload = JSON.stringify([input.match.id, input.phase, input.match.homeScore, input.match.awayScore, input.match.events, input.players.map(({ player, rating, seasonAverage }) => [player.id, rating?.overall, rating?.attributes, seasonAverage])]);
   let hash = 2166136261;
@@ -64,7 +82,7 @@ export function buildMatchprintCanvas(input: MatchprintInput) {
   const canvas = document.createElement("canvas");
   const rows = Math.ceil(players.length / 2);
   canvas.width = 1080;
-  canvas.height = Math.max(1350, 600 + rows * 78 + 125);
+  canvas.height = Math.max(1474, 724 + rows * 78 + 125);
   const ctx = canvas.getContext("2d");
   if (!ctx) return null;
   const contributions = match.eventsAvailable === false ? {} : contributionsFor(match.events, phase);
@@ -97,24 +115,25 @@ export function buildMatchprintCanvas(input: MatchprintInput) {
   ctx.textAlign = "right"; text(ctx, `TEAM ${formatRating(average)} / 10`, 1016, 321, 20, INK, 600); ctx.textAlign = "left";
   [64, 390, 716].forEach((x, index) => {
     const item = leaders[index];
-    panel(ctx, x, 346, 300, 176, "#fffdf8");
+    panel(ctx, x, 346, 300, 300, "#fffdf8");
     text(ctx, `0${index + 1}`, x + 18, 376, 15, "#836413", 600);
     if (!item) { text(ctx, "Awaiting a rating", x + 18, 418, 21, MUTED); return; }
     nameLines(ctx, item.player.name, x + 54, 377, 226, 23);
-    badge(ctx, item.rating?.overall, x + 18, 426, true);
-    fittedText(ctx, contributionLabel(contributions[item.player.id]) || item.player.roleLabel, x + 122, 456, 159, 17, MUTED, 400);
-    if (phase === "ft") fittedText(ctx, seasonUnavailable ? "History unavailable" : seasonComparison(item.rating?.overall, item.seasonAverage), x + 18, 501, 264, 17, MUTED, 400);
-    else text(ctx, "First-half performance", x + 18, 501, 17, MUTED, 400);
+    jersey(ctx, item.player, x + 91, 413);
+    badge(ctx, item.rating?.overall, x + 192, 438, true);
+    fittedText(ctx, contributionLabel(contributions[item.player.id]) || item.player.roleLabel, x + 18, 594, 264, 21, INK, 600);
+    if (phase === "ft") fittedText(ctx, seasonUnavailable ? "History unavailable" : seasonComparison(item.rating?.overall, item.seasonAverage), x + 18, 625, 264, 17, MUTED, 400);
+    else text(ctx, "First-half performance", x + 18, 625, 17, MUTED, 400);
   });
 
-  text(ctx, "PLAYER RATINGS", 64, 573, 21, INK, 600);
-  ctx.textAlign = "right"; text(ctx, `${rated.length} / ${players.length} rated${rated.length < players.length ? " · PARTIAL SHEET" : ""}`, 1016, 573, 17, MUTED); ctx.textAlign = "left";
+  text(ctx, "PLAYER RATINGS", 64, 697, 21, INK, 600);
+  ctx.textAlign = "right"; text(ctx, `${rated.length} / ${players.length} rated${rated.length < players.length ? " · PARTIAL SHEET" : ""}`, 1016, 697, 17, MUTED); ctx.textAlign = "left";
   const list = [...players].sort((a, b) => Number(b.player.starter) - Number(a.player.starter) || (a.player.number ?? 99) - (b.player.number ?? 99));
   list.forEach((item, index) => {
     const column = index < rows ? 0 : 1;
     const row = index % rows;
     const x = column ? 556 : 64;
-    const y = 599 + row * 78;
+    const y = 723 + row * 78;
     text(ctx, item.player.number == null ? "—" : String(item.player.number).padStart(2, "0"), x, y + 24, 17, MUTED);
     nameLines(ctx, item.player.name, x + 40, y + 24, 320, 22);
     badge(ctx, item.rating?.overall, x + 395, y + 5);
@@ -126,7 +145,7 @@ export function buildMatchprintCanvas(input: MatchprintInput) {
   line(ctx, 64, bottom - 13, 952);
   const includesConverted = players.some((item) => item.seasonAverage?.includesConverted || item.rating?.convertedFromFive);
   fittedText(ctx, phase === "ft" ? `${seasonLabel(match.kickoff)} · Your earlier FT ratings · Minimum 3 matches for comparison${includesConverted ? " · Includes converted /5 history" : ""}` : "First-half goals and assists only, including stoppage time.", 64, bottom + 14, 952, 16, MUTED, 400);
-  fittedText(ctx, `G = goals · A = assists${match.eventsAvailable === false ? " · Event data unavailable" : ""}${match.source === "demo" ? " · EXAMPLE DATA" : ""}`, 64, bottom + 43, 750, 16, MUTED, 400);
+  fittedText(ctx, `Goals & assists${match.eventsAvailable === false ? " · Event data unavailable" : ""}${match.source === "demo" ? " · EXAMPLE DATA" : ""}`, 64, bottom + 43, 750, 16, MUTED, 400);
   text(ctx, "Independent fan ratings · not an official club rating", 64, bottom + 74, 15, MUTED, 400);
   ctx.textAlign = "right"; text(ctx, `NB–${signature(input)}`, 1016, bottom + 73, 15, INK, 600); ctx.textAlign = "left";
   return canvas;
