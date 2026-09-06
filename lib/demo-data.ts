@@ -3,11 +3,11 @@ import type { MatchData } from "@/lib/types";
 export const DEMO_MATCH: MatchData = {
   id: "demo-barca-rivals",
   providerId: null,
-  competition: "Test match · Local beta",
-  date: "Next match test sheet",
-  kickoff: new Date().toISOString(),
+  competition: "Example match",
+  date: "Illustrative match · practice your ratings",
+  kickoff: "2026-08-01T18:00:00.000Z",
   venue: "Estadi Olímpic",
-  status: "Test mode",
+  status: "finished",
   statusShort: "FT",
   home: {
     providerId: 529,
@@ -18,6 +18,14 @@ export const DEMO_MATCH: MatchData = {
   away: { name: "Rivals", shortName: "RIV" },
   homeScore: 3,
   awayScore: 1,
+  halftimeHomeScore: 1,
+  halftimeAwayScore: 0,
+  eventsAvailable: true,
+  events: [
+    { id: "example-goal-1", type: "goal", playerId: "demo-st", assistPlayerId: "demo-rw", detail: "Goal", minute: 28, extraMinute: null, period: "first" },
+    { id: "example-goal-2", type: "goal", playerId: "demo-lw", assistPlayerId: "demo-rm", detail: "Goal", minute: 61, extraMinute: null, period: "second" },
+    { id: "example-goal-3", type: "goal", playerId: "demo-st", assistPlayerId: "demo-sub-1", detail: "Goal", minute: 78, extraMinute: null, period: "second" },
+  ],
   formation: "4–3–3",
   source: "demo",
   players: [
