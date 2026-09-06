@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { DEMO_MATCH } from "@/lib/demo-data";
 import { getServerSupabase } from "@/lib/supabase/server";
 import type { MatchData, Player, Role, Team } from "@/lib/types";
+import { playerName, shortPlayerName } from "@/lib/player-names";
 
 export const dynamic = "force-dynamic";
 
@@ -59,8 +60,8 @@ function normalizeMatch(row: MatchRow): MatchData {
     return {
       id: entry.player_id,
       providerId: player?.provider_id,
-      name: player?.name || "Unknown player",
-      short: (player?.name || "Unknown").split(" ").slice(-1)[0],
+      name: playerName(player?.name) || "Unknown player",
+      short: shortPlayerName(player?.name || "Unknown"),
       number: entry.squad_number,
       role: entry.role_code,
       roleLabel: entry.role_label,

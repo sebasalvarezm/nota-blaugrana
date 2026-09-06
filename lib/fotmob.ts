@@ -1,6 +1,7 @@
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Role } from "@/lib/types";
+import { playerName } from "@/lib/player-names";
 
 const FOTMOB_BASE = "https://www.fotmob.com";
 const FOTMOB_TEAM_ID = Number(process.env.FOTMOB_TEAM_ID || 8634);
@@ -223,16 +224,26 @@ async function upsertClub(supabase: SupabaseClient, team: FotmobTeam) {
   return data.id as string;
 }
 
-async function upsertPlayer(supabase: SupabaseClient, player: FotmobEventPlayer | FotmobPlayer, position?: number) {
+async function upsertPlayer(supabase: SupabaseClient, player: FotmobEventPlayer | FotmobPlayer, position?: number, authoritative = true) {
   const rawId = Number(player.id);
-  if (!Number.isFinite(rawId) || !player.name) return null;
+  if (!Number.isSafeInteger(rawId) || rawId <= 0) return null;
+  const providerId = namespacedId("player", rawId);
+  if (!authoritative) {
+    const { data: existing, error } = await supabase.from("players")
+      .select("id").eq("provider_id", providerId).maybeSingle();
+    if (error) throw error;
+    // Lineups own names and positions. Events only resolve the same stable ID.
+    if (existing) return existing.id as string;
+  }
+  const name = playerName(player.name);
+  if (!name) return null;
   const { data, error } = await supabase
     .from("players")
     .upsert({
-      provider_id: namespacedId("player", rawId),
-      name: player.name,
+      provider_id: providerId,
+      name,
       photo_url: `https://images.fotmob.com/image_resources/playerimages/${rawId}.png`,
-      default_position: position == null ? null : String(position),
+      ...(position == null ? {} : { default_position: String(position) }),
     }, { onConflict: "provider_id" })
     .select("id")
     .single();
@@ -373,8 +384,8 @@ function eventPeople(event: FotmobEvent) {
     : event.playerId && event.fullName
       ? { id: event.playerId, name: event.fullName }
       : undefined;
-  const assist = event.assistPlayerId && event.assistStr
-    ? { id: event.assistPlayerId, name: event.assistStr }
+  const assist = event.assistPlayerId
+    ? { id: event.assistPlayerId, name: playerName(event.assistStr) }
     : undefined;
   return { player, assist };
 }
@@ -398,8 +409,8 @@ async function importEvents(
     const event = events[index];
     const people = eventPeople(event);
     const [playerId, assistPlayerId] = await Promise.all([
-      people.player ? upsertPlayer(supabase, people.player) : Promise.resolve(null),
-      people.assist ? upsertPlayer(supabase, people.assist) : Promise.resolve(null),
+      people.player ? upsertPlayer(supabase, people.player, undefined, false) : Promise.resolve(null),
+      people.assist ? upsertPlayer(supabase, people.assist, undefined, false) : Promise.resolve(null),
     ]);
     const eventKey = `fotmob:${event.eventId || event.reactKey || `${event.type}:${event.time || 0}:${index}`}`;
     const teamId = event.isHome == null ? null : event.isHome ? match.home_team_id : match.away_team_id;
