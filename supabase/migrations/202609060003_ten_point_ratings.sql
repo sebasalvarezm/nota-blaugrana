@@ -65,6 +65,10 @@ begin
   if write_version is distinct from 10 then raise exception 'Refresh the app to save ratings'; end if;
   perform pg_advisory_xact_lock(hashtextextended(auth.uid()::text || target_match_id::text || target_player_id::text || target_phase::text, 1));
   select * into existing from public.ratings where user_id = auth.uid() and match_id = target_match_id and player_id = target_player_id and phase = target_phase for update;
+  -- A timed-out request may already have committed; an exact retry is a no-op.
+  if clear_rating and existing.id is null then return null; end if;
+  if not clear_rating and existing.id is not null and existing.overall is not distinct from overall_score
+    and existing.attributes = attribute_scores and existing.converted_from_five = legacy_conversion then return existing.updated_at; end if;
   if existing.id is not null and existing.updated_at is distinct from expected_updated_at then
     raise exception 'This rating changed on another device' using errcode = '40001';
   end if;
