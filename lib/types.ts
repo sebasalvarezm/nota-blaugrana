@@ -62,6 +62,8 @@ export type MatchData = {
 export type PlayerRating = {
   overall: number | null;
   attributes: Record<string, number | null>;
+  updatedAt?: string;
+  convertedFromFive?: boolean;
 };
 
 export type PhaseRatings = Record<string, PlayerRating>;
