@@ -1,5 +1,5 @@
-import type { MatchData } from "@/lib/types";
-import { formatRating } from "@/lib/ratings";
+import type { MatchData, PhaseRatings } from "@/lib/types";
+import { formatRating, validScore } from "@/lib/ratings";
 import { readStoredRatings, type StoredRatings } from "@/lib/rating-storage";
 
 export type SeasonAverage = { average: number; matches: number; includesConverted: boolean };
@@ -11,12 +11,25 @@ export function seasonLabel(kickoff: string): string {
   const year = new Date(seasonStart(kickoff)).getUTCFullYear();
   return `${year}/${String(year + 1).slice(-2)}`;
 }
-export function seasonComparison(score: number | null | undefined, baseline?: SeasonAverage): string {
-  if (!baseline) return "No baseline";
-  if (baseline.matches < 3) return `Limited history · ${baseline.matches}`;
-  if (score == null) return `Season ${formatRating(baseline.average)}`;
-  const difference = Math.round((score - baseline.average) * 10) / 10;
-  return difference === 0 ? "= season avg" : `${difference > 0 ? "↑" : "↓"} ${Math.abs(difference).toFixed(1)} vs season`;
+export function seasonComparison(_score: number | null | undefined, baseline?: SeasonAverage): string {
+  if (!baseline || baseline.matches < 1 || !Number.isFinite(baseline.average)) return "";
+  return `Season avg ${formatRating(baseline.average)}`;
+}
+
+export function includeCurrentMatch(previous: Record<string, SeasonAverage>, match: MatchData, ratings: PhaseRatings): Record<string, SeasonAverage> {
+  const result = { ...previous };
+  if (match.source !== "cloud" || match.status !== "finished") return result;
+  // Both history loaders exclude this match. Add its latest local FT value once,
+  // including an edit still waiting to sync. HT ratings never become extra votes.
+  for (const player of match.players) {
+    const rating = ratings[player.id];
+    if (!validScore(rating?.overall)) continue;
+    const history = previous[player.id];
+    const count = history?.matches || 0;
+    result[player.id] = { average: ((history?.average || 0) * count + rating.overall) / (count + 1), matches: count + 1,
+      includesConverted: Boolean(history?.includesConverted || rating.convertedFromFive) };
+  }
+  return result;
 }
 export function localSeasonAverages(storage: Pick<Storage, "length" | "key" | "getItem">, scope: string, match: MatchData): Record<string, SeasonAverage> {
   if (match.source !== "cloud") return {};

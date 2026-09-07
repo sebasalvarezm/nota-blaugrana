@@ -179,3 +179,10 @@ input, .form-field select { width:100%; min-width:0; background:#091c30; color:v
 .position-fields small { display:block; color:var(--muted); font-size:11px; }
 .position-fields select { min-width:0; width:100%; min-height:44px; }
 @media(max-width:420px) { .position-preview { height:400px; } .position-preview > span:not(.position-direction) { width:64px; font-size:10px; } .lineup-actions { flex-direction:column; gap:4px; align-items:flex-end; } }
+.mvp-picker { border:1px solid #71819866; border-radius:10px; margin:0 0 20px; padding:12px 16px; }
+.mvp-picker legend { font-weight:600; padding:0 6px; }
+.mvp-picker p { margin:0 0 12px; font-size:13px; }
+.mvp-picker > div { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; }
+.mvp-picker label { display:grid; gap:5px; font-size:12px; }
+.mvp-picker select { width:100%; min-width:0; min-height:44px; font-size:13px; }
+@media(max-width:620px) { .mvp-picker > div { grid-template-columns:1fr; } }

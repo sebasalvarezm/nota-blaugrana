@@ -1,6 +1,7 @@
 import type { MatchData, Phase, Player, PlayerRating } from "@/lib/types";
 import { contributionLabel, contributionsFor } from "@/lib/match-events";
 import { averageRating, formatRating, ratingBand, RATING_COLORS } from "@/lib/ratings";
+import { selectMvpIds } from "@/lib/mvps";
 import { playerName } from "@/lib/player-names";
 import { seasonComparison, seasonLabel, type SeasonAverage } from "@/lib/season";
 
@@ -71,7 +72,7 @@ function jersey(ctx: CanvasRenderingContext2D, player: Player, x: number, y: num
   ctx.restore();
 }
 function signature(input: MatchprintInput) {
-  const payload = JSON.stringify([input.match.id, input.phase, input.match.homeScore, input.match.awayScore, input.match.events, input.players.map(({ player, rating, seasonAverage }) => [player.id, rating?.overall, rating?.attributes, seasonAverage])]);
+  const payload = JSON.stringify([input.match.id, input.phase, input.featuredPlayerIds, input.match.homeScore, input.match.awayScore, input.match.events, input.players.map(({ player, rating, seasonAverage }) => [player.id, rating?.overall, rating?.attributes, seasonAverage])]);
   let hash = 2166136261;
   for (let index = 0; index < payload.length; index++) hash = Math.imul(hash ^ payload.charCodeAt(index), 16777619);
   return (hash >>> 0).toString(36).toUpperCase().padStart(7, "0");
@@ -87,13 +88,13 @@ export function buildMatchprintCanvas(input: MatchprintInput) {
   if (!ctx) return null;
   const contributions = match.eventsAvailable === false ? {} : contributionsFor(match.events, phase);
   const rated = players.filter((item) => item.rating?.overall != null).sort((a, b) => (b.rating?.overall || 0) - (a.rating?.overall || 0) || a.player.name.localeCompare(b.player.name));
-  const leaders = rated.slice(0, 3);
+  const leaders = selectMvpIds(rated.map(item=>({id:item.player.id,name:item.player.name,score:item.rating!.overall!})), input.featuredPlayerIds).map(id=>rated.find(item=>item.player.id===id)!);
   const average = averageRating(rated.map((item) => item.rating?.overall));
   const label = phase === "ht" ? "HALF TIME" : match.status === "finished" ? `FULL TIME${["AET", "PEN"].includes(match.statusShort) ? ` · ${match.statusShort}` : ""}` : "FT RATINGS · IN PROGRESS";
   const matchScore = phase === "ht" ? [match.halftimeHomeScore, match.halftimeAwayScore] : [match.homeScore, match.awayScore];
   const contextFor = (item: MatchprintPlayer) => {
     const ga = contributionLabel(contributions[item.player.id]);
-    const comparison = phase === "ft" ? seasonUnavailable ? "History unavailable" : seasonComparison(item.rating?.overall, item.seasonAverage) : "";
+    const comparison = phase === "ft" ? seasonUnavailable ? "" : seasonComparison(item.rating?.overall, item.seasonAverage) : "";
     return [ga, comparison].filter(Boolean).join("   ·   ");
   };
 
@@ -122,7 +123,7 @@ export function buildMatchprintCanvas(input: MatchprintInput) {
     jersey(ctx, item.player, x + 91, 413);
     badge(ctx, item.rating?.overall, x + 192, 438, true);
     fittedText(ctx, contributionLabel(contributions[item.player.id]) || item.player.roleLabel, x + 18, 594, 264, 21, INK, 600);
-    if (phase === "ft") fittedText(ctx, seasonUnavailable ? "History unavailable" : seasonComparison(item.rating?.overall, item.seasonAverage), x + 18, 625, 264, 17, MUTED, 400);
+    if (phase === "ft") fittedText(ctx, seasonUnavailable ? "" : seasonComparison(item.rating?.overall, item.seasonAverage), x + 18, 625, 264, 17, MUTED, 400);
     else text(ctx, "First-half performance", x + 18, 625, 17, MUTED, 400);
   });
 
@@ -144,8 +145,8 @@ export function buildMatchprintCanvas(input: MatchprintInput) {
   const bottom = canvas.height - 97;
   line(ctx, 64, bottom - 13, 952);
   const includesConverted = players.some((item) => item.seasonAverage?.includesConverted || item.rating?.convertedFromFive);
-  fittedText(ctx, phase === "ft" ? `${seasonLabel(match.kickoff)} · Your earlier FT ratings · Minimum 3 matches for comparison${includesConverted ? " · Includes converted /5 history" : ""}` : "First-half goals and assists only, including stoppage time.", 64, bottom + 14, 952, 16, MUTED, 400);
-  fittedText(ctx, `Goals & assists${match.eventsAvailable === false ? " · Event data unavailable" : ""}${match.source === "demo" ? " · EXAMPLE DATA" : ""}`, 64, bottom + 43, 750, 16, MUTED, 400);
+  fittedText(ctx, phase === "ft" ? `${seasonLabel(match.kickoff)} · Personal season averages · Completed FT ratings${includesConverted ? " · Includes converted /5 history" : ""}` : "First-half goals and assists only, including stoppage time.", 64, bottom + 14, 952, 16, MUTED, 400);
+  fittedText(ctx, `Goals & assists${seasonUnavailable && phase === "ft" ? " · Season averages unavailable" : ""}${match.eventsAvailable === false ? " · Event data unavailable" : ""}${match.source === "demo" ? " · EXAMPLE DATA" : ""}`, 64, bottom + 43, 750, 16, MUTED, 400);
   text(ctx, "Independent fan ratings · not an official club rating", 64, bottom + 74, 15, MUTED, 400);
   ctx.textAlign = "right"; text(ctx, `NB–${signature(input)}`, 1016, bottom + 73, 15, INK, 600); ctx.textAlign = "left";
   return canvas;
