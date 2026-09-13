@@ -17,6 +17,7 @@ import { Modal } from "@/components/modal";
 import { useRatingStore } from "@/components/use-rating-store";
 import { useSeasonAverages } from "@/components/use-season-averages";
 import { selectMvpIds, replaceMvp } from "@/lib/mvps";
+import type { PositionChange } from "@/lib/position-save";
 import { PositionEditor } from "@/components/position-editor";
 import { MatchEditor } from "@/components/match-editor";
 
@@ -199,14 +200,25 @@ export function MatchdayApp() {
     if (!response.ok) throw new Error("Could not save the match. Your edits remain in the form.");
     const result = await response.json(); await loadMatch(result.matchId); setEditorOpen(false); setToast("Match details saved.");
   }
-  async function savePositions(players: Player[]) {
-    if (!isAdmin) throw new Error("Owner access required");
+  async function savePositions(changes: PositionChange[]) {
+    if (!isAdmin) throw new Error("Owner access required.");
+    if (!changes.length) return;
+    const savingMatchId = match.id;
     const session = await getBrowserSupabase()?.auth.getSession();
-    const response = await fetch("/api/matches/positions", { method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${session?.data.session?.access_token || ""}`},
-      body:JSON.stringify({matchId:match.id,positions:players.map(player=>({player_id:player.id,role_code:player.role,role_label:player.roleLabel,pitch_x:player.x??null,pitch_y:player.y??null}))}),signal:AbortSignal.timeout(12_000)});
-    if (!response.ok) throw new Error("Positions could not be saved");
-    setMatch(previous=>({...previous,players})); setPositionsOpen(false); setToast("Positions saved for this match.");
-    await loadMatch(match.id,true,true);
+    let response: Response;
+    try {
+      response = await fetch("/api/matches/positions", { method:"POST", headers:{"Content-Type":"application/json",Authorization:`Bearer ${session?.data.session?.access_token || ""}`},
+        body:JSON.stringify({matchId:savingMatchId,positions:changes}),signal:AbortSignal.timeout(15_000)});
+    } catch { throw new Error("The connection was interrupted. Your edits are still here; retrying is safe."); }
+    const result = await response.json().catch(()=>null);
+    if (!response.ok) throw new Error(typeof result?.error === "string" ? result.error : "Position saving is unavailable. Your edits are still here; please retry.");
+    if (result?.ok!==true || result.matchId!==savingMatchId || !Array.isArray(result.positions)) throw new Error("Could not confirm the save. Please retry.");
+    const saved = result.positions as Array<Omit<PositionChange,"expected">>;
+    setMatch(previous=>previous.id!==savingMatchId ? previous : ({...previous,players:previous.players.map(player=>{
+      const position = saved.find(row=>row.player_id===player.id);
+      return position ? {...player,role:position.role_code,roleLabel:position.role_label,x:position.pitch_x??undefined,y:position.pitch_y??undefined} : player;
+    })}));
+    setPositionsOpen(false); setToast("Positions saved and verified for this match.");
   }
   function chooseMatch(id: string) {
     posterGeneration.current += 1;
