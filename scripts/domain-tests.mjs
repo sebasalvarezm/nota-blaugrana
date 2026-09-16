@@ -149,8 +149,11 @@ assert.equal(parsePositionChanges([...saveChanges,...saveChanges]),null);
 assert.equal(parsePositionChanges([{...saveChanges[0],pitch_x:Infinity}]),null);
 assert.equal(parsePositionChanges([{...saveChanges[0],expected:null}]),null);
 assert.equal(positionSaveError("PGRST202").status,503);
-assert.match(positionSaveError("PGRST202").message,/database update/);
-assert.equal(positionSaveError("40001").status,409);
+assert.match(positionSaveError("PGRST202").message,/database update/);assert.equal(positionSaveError("40001").status,409);
+assert.equal(positionSaveError("PT409").status,409);
+const conflictSql=readFileSync(path.join(root,"supabase/migrations/202609160001_position_conflict_retry_fix.sql"),"utf8");
+assert.equal((conflictSql.match(/errcode='PT409'/g)||[]).length,2);
+assert.doesNotMatch(conflictSql,/errcode='40001'/);
 assert.equal(positionSaveError("42501").status,503);
 // Exercise the real route with isolated authentication/database doubles.
 const savedPosition={player_id:savePlayerId,role_code:"FB",role_label:"Right-back",pitch_x:82,pitch_y:72};
@@ -174,7 +177,7 @@ try {
  dbError={code:"PGRST202",message:"fixture missing function"};
  response=await savePositionRequest(saveRequest());
  assert.equal(response.status,503);assert.match((await response.json()).error,/database update/);
- dbError={code:"40001",message:"fixture changed player"};
+ dbError={code:"PT409",message:"fixture changed player"};
  assert.equal((await savePositionRequest(saveRequest())).status,409);
  dbError=null;dbRows=[{...savedPosition,pitch_x:12.5}];
  assert.equal((await savePositionRequest(saveRequest())).status,503);
