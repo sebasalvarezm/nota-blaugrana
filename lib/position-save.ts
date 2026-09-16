@@ -37,7 +37,7 @@ export function parsePositionChanges(input: unknown): PositionChange[] | null {
 export function positionSaveError(code?: string): {status:number; message:string} {
   if (["PGRST202","PGRST205","42P01","42883"].includes(code||"")) return {status:503,message:"Position saving needs the database update supplied with this release. Your edits have not been saved."};
   if (code==="42501") return {status:503,message:"The database cannot save positions with its current permissions. Apply the position-saving database update."};
-  if (code==="40001") return {status:409,message:"One of these players changed since you opened the editor. Refresh the match and reopen Edit positions before trying again."};
+  if (code==="PT409" || code==="40001") return {status:409,message:"One of these players changed since you opened the editor. Refresh the match and reopen Edit positions before trying again."};
   if (["22023","23503","23514"].includes(code||"")) return {status:400,message:"These positions are no longer valid for this lineup. Refresh the match and try again."};
   return {status:503,message:"Position saving is temporarily unavailable. Your edits are still here; please retry."};
 }
